@@ -1,0 +1,48 @@
+package main
+
+import (
+	"context"
+	"log"
+	"math-spark/internal/di"
+	"math-spark/internal/infrastructure/config"
+	"math-spark/internal/infrastructure/persistance"
+	"math-spark/internal/interfaces/http/middlewares"
+	"math-spark/internal/interfaces/http/routes"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+    cfg, err := config.LoadConfig()
+    if err != nil {
+        log.Fatalf("Error loading config: %v", err)
+    }
+
+    db, err := persistance.NewDatabase(cfg)
+    if err != nil {
+        log.Fatalf("Error connecting to MySQL: %v", err)
+    }
+    defer db.Close()
+
+    container, emailService := di.NewContainer(db.DB)
+    go emailService.StartWorker(context.Background())
+
+    r := gin.Default()
+    r.SetTrustedProxies([]string{"127.0.0.1"})
+
+    corsConfig := cors.Config{
+        AllowOrigins:     []string{"http://localhost:5173"},
+        AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+        AllowHeaders:     []string{"Content-Type", "Authorization"},
+        AllowCredentials: true,
+        ExposeHeaders:    []string{"Set-Cookie"}, 
+    }
+    r.Use(cors.New(corsConfig))
+
+    r.Use(middlewares.ErrorHandler())
+    routes.SetupRoutes(r, db.DB, container)
+    
+    log.Println("Servidor escuchando en http://localhost:8080")
+    r.Run(":8080")
+}
